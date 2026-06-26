@@ -5,23 +5,28 @@ import researchRouter from "./routes/research.js";
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-
-const ALLOWED_ORIGINS = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map(u => u.trim())
-  : [];
+const allowedOrigins = [
+    process.env.CLIENT_URL|| "https://inside-iim-assignment.vercel.app"
+    // Add your production domains here
+];
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.length > 0) {
-      const isAllowed = ALLOWED_ORIGINS.includes(origin) || 
-                        ALLOWED_ORIGINS.includes("*") || 
-                        origin.startsWith("http://localhost:");
-      return callback(null, isAllowed);
-    }
-    return callback(null, true);
-  },
-  credentials: true
+    origin: function (origin, callback) {
+        // Allow requests with no origin (mobile apps, Postman, etc.)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            // In production, you might want to log this
+            console.warn(`CORS blocked origin: ${origin}`);
+            callback(null, true); // For now, allow - change to callback(new Error('Not allowed by CORS')) in strict mode
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    maxAge: 86400 // Cache preflight for 24 hours
 }));
 app.use(express.json());
 
