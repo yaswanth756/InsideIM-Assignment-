@@ -260,7 +260,7 @@ Return the FINAL report as JSON (NO markdown fences, NO extra text):
   "disclaimer": "This analysis is AI-generated for educational purposes only. It does not constitute financial advice. Always consult a qualified financial advisor before making investment decisions. Past performance does not guarantee future results."
 }`;
 
-export const CORE_VERDICT_PROMPT = `You are a Portfolio Manager and Chief Investment Officer. Based ONLY on the provided raw company overview and financial/news/competitor/industry summary data, generate a quick core investment verdict.
+export const CORE_VERDICT_PROMPT = `You are a Portfolio Manager and Chief Investment Officer. Based ONLY on the provided raw company overview and financial/news/competitor/industry summary data, generate a PRELIMINARY directional signal. This is NOT a final verdict — specialists are still reviewing.
 
 Return ONLY this JSON structure, no markdown fences, no extra text:
 {
@@ -268,9 +268,10 @@ Return ONLY this JSON structure, no markdown fences, no extra text:
   "ticker": "Ticker",
   "sector": "Sector",
   "exchange": "Exchange",
-  "verdict": "INVEST|PASS",
-  "confidence": 75,
-  "keyReasons": [
+  "preliminarySignal": "Bullish|Bearish|Neutral",
+  "preliminaryConfidence": "Low|Medium|High",
+  "confidenceRange": "55-65",
+  "preliminaryReasons": [
     "Reason 1 (under 25 words)",
     "Reason 2 (under 25 words)",
     "Reason 3 (under 25 words)"
@@ -281,15 +282,10 @@ Return ONLY this JSON structure, no markdown fences, no extra text:
     "Risk 3 (under 25 words)"
   ],
   "companyOverview": "A brief one-paragraph summary of what the company does, its core business model and value proposition.",
-  "reasoning": "A compelling 2-paragraph investment thesis or rejection thesis. Must cite specific facts/ratios.",
-  "bullCase": "1-2 paragraphs describing the bull case/upside path.",
-  "bearCase": "1-2 paragraphs describing the bear case/downside triggers.",
-  "valuationAssessment": "Undervalued|Fairly Valued|Overvalued",
-  "catalysts": [
-    { "catalyst": "Event description", "timeline": "Near-term|Mid-term|Long-term", "impact": "high|medium|low" }
-  ],
-  "timeHorizon": "Medium-term (1-3yr)",
-  "disclaimer": "This analysis is AI-generated for educational purposes only. It does not constitute financial advice. Always consult a qualified financial advisor before making investment decisions."
+  "preliminaryThesis": "A 1-2 paragraph preliminary investment thesis. Must cite specific facts/ratios. Label this as a preliminary assessment pending specialist review.",
+  "valuationLean": "Potentially Undervalued|Potentially Fairly Valued|Potentially Overvalued",
+  "status": "Specialist review in progress",
+  "disclaimer": "This is a preliminary assessment based on initial data. Final investment verdict will be provided after specialist analysts complete their review."
 }`;
 
 export const DEEP_FINANCIAL_PROMPT = `You are a senior investment analyst. Perform a highly detailed, institutional-grade Deep Financial Analysis for this company based on the provided financial and web search data.

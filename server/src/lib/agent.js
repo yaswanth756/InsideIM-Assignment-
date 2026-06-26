@@ -376,7 +376,7 @@ function getSpecialistConfig(toolData, company) {
 
 // ── PHASE 3: Supervisor Synthesis ──
 
-async function supervisorSynthesize(analyses, toolData, company, onStep) {
+async function supervisorSynthesize(analyses, toolData, company, initialVerdict, onStep) {
   if (onStep) onStep({ type: "status", step: "verdict", message: "🎯 CIO synthesizing final investment verdict..." });
 
   const model = createSupervisorModel();
@@ -392,7 +392,13 @@ CEO: ${toolData.financials.data.ceo || "N/A"}
 Description: ${toolData.financials.data.description || "N/A"}`
     : `Company: ${company}`;
 
-  const input = `=== COMPANY PROFILE ===
+  const input = `=== INITIAL QUICK VERDICT (Shown to User) ===
+Preliminary Signal: ${initialVerdict?.preliminarySignal || "N/A"}
+Preliminary Confidence: ${initialVerdict?.preliminaryConfidence || "N/A"} (Range: ${initialVerdict?.confidenceRange || "N/A"}%)
+Valuation Lean: ${initialVerdict?.valuationLean || "N/A"}
+Preliminary Thesis: ${initialVerdict?.preliminaryThesis || "N/A"}
+
+=== COMPANY PROFILE ===
 ${profile}
 
 === FINANCIAL ANALYST (25% weight) ===
@@ -415,9 +421,14 @@ ${JSON.stringify(analyses.sentiment || { error: "No data" })}`;
 
   console.log(`[supervisor] Starting synthesis (context: ${input.length} chars)...`);
 
+  const continuityDirective = `
+
+=== CONTINUITY DIRECTIVE ===
+You are provided with the "INITIAL QUICK VERDICT" (Preliminary View) that was already shown to the user. To prevent a jarring user experience, you should keep the final verdict, confidence rating, and valuation assessment aligned with the initial preliminary signal (e.g. Bullish should correspond to INVEST, Bearish to PASS, Neutral to PASS or a low-confidence INVEST), preliminary confidence, and valuation lean, UNLESS the detailed specialist reports provide strong, objective evidence of a critical discrepancy (e.g., hidden liabilities, extreme risk, or significantly worse financial metrics than initially known). If you do diverge from the initial preliminary assessment, justify this clearly in your final reasoning.`;
+
   const response = await withRetry(
     () => model.invoke([
-      new SystemMessage(SUPERVISOR_PROMPT),
+      new SystemMessage(SUPERVISOR_PROMPT + continuityDirective),
       new HumanMessage(`Synthesize these 6 analyst reports into the final investment decision. Respond with ONLY the JSON object — no markdown fences, no text before or after:\n\n${input}`),
     ]),
     { label: "Supervisor" }
@@ -542,7 +553,8 @@ export async function runResearch(company, onStep) {
   if (cachedReport) {
     if (onStep) {
       onStep({ type: "status", step: "cache", message: "Found cached research (< 30 min old)..." });
-      onStep({ type: "verdict", data: cachedReport });
+      // Cached reports are already final (have isFinal: true from supervisor), send as report event
+      onStep({ type: "report", data: cachedReport, isFinal: true });
       const specKeys = ["financialAnalysis", "competitivePosition", "newsSentiment", "riskAssessment", "industryOutlook", "managementAnalysis"];
       for (const key of specKeys) {
         if (cachedReport[key]) {
@@ -569,10 +581,10 @@ export async function runResearch(company, onStep) {
   // Cache raw tool data immediately
   setCache("raw:" + cacheKey, { toolData, sourceUrls, toolCallLog });
 
-  // ── PHASE 1.5: Core Verdict ──
-  if (onStep) onStep({ type: "status", step: "verdict", message: "Preparing core verdict..." });
+  // ── PHASE 1.5: Preliminary Signal (NOT final verdict) ──
+  if (onStep) onStep({ type: "status", step: "preliminary", message: "Generating preliminary signal..." });
   const coreVerdict = await generateCoreVerdict(company, toolData, sourceUrls);
-  if (!coreVerdict) throw new Error("Failed to generate core investment verdict");
+  if (!coreVerdict) throw new Error("Failed to generate preliminary signal");
 
   // Attach metadata
   coreVerdict._meta = {
@@ -584,8 +596,11 @@ export async function runResearch(company, onStep) {
     sources: (sourceUrls || []).slice(0, 15),
   };
 
+  console.log(`[pipeline] Preliminary signal: ${coreVerdict.preliminarySignal} (${coreVerdict.preliminaryConfidence} confidence)`);
+  console.log(`[pipeline] Phase 1.5 complete (${timer.elapsedStr()})\n`);
+
   if (onStep) {
-    onStep({ type: "verdict", data: coreVerdict });
+    onStep({ type: "preliminary", data: coreVerdict });
   }
 
   // ── PHASE 2: Run 6 specialists in parallel ──
@@ -636,8 +651,16 @@ export async function runResearch(company, onStep) {
 
   console.log(`[pipeline] Phase 2 complete (${timer.elapsedStr()}) — ${Object.keys(analyses).length}/6 specialists succeeded\n`);
 
+  // Build intermediate report from preliminary + specialists (no final verdict yet)
   const report = {
-    ...coreVerdict,
+    // Carry over preliminary data for supervisor context
+    companyName: coreVerdict.companyName,
+    ticker: coreVerdict.ticker,
+    sector: coreVerdict.sector,
+    exchange: coreVerdict.exchange,
+    companyOverview: coreVerdict.companyOverview,
+    _meta: coreVerdict._meta,
+    // Specialist results
     financialAnalysis: analyses.financial,
     competitivePosition: analyses.moat,
     newsSentiment: analyses.sentiment,
@@ -646,19 +669,77 @@ export async function runResearch(company, onStep) {
     managementAnalysis: analyses.management,
   };
 
+  // ── PHASE 3: Supervisor Synthesis (CIO Async Reconciliation) ──
+  console.log(`[pipeline] PHASE 3: CIO Supervisor Synthesis starting`);
+  let finalReport = report;
+  try {
+    const synthesized = await supervisorSynthesize(analyses, toolData, company, coreVerdict, onStep);
+    if (synthesized) {
+      // Merge strategy:
+      // 1. Override top-level fields with supervisor outputs
+      // 2. Deep merge detailed sections to keep rich specialist data + supervisor refinements
+      finalReport = {
+        ...report,
+        ...synthesized,
+        
+        // Explicit overrides for consistency:
+        verdict: synthesized.verdict || report.verdict,
+        confidence: typeof synthesized.confidence === 'number' ? synthesized.confidence : report.confidence,
+        reasoning: synthesized.reasoning || report.reasoning,
+        bullCase: synthesized.bullCase || report.bullCase,
+        bearCase: synthesized.bearCase || report.bearCase,
+        catalysts: synthesized.catalysts || report.catalysts,
+        timeHorizon: synthesized.timeHorizon || report.timeHorizon,
+        valuationAssessment: synthesized.valuationAssessment || report.valuationAssessment,
+
+        // Deep merged sections:
+        financialAnalysis: {
+          ...analyses.financial,
+          ...(synthesized.financialAnalysis || {})
+        },
+        competitivePosition: {
+          ...analyses.moat,
+          ...(synthesized.competitivePosition || {})
+        },
+        newsSentiment: {
+          ...analyses.sentiment,
+          ...(synthesized.newsSentiment || {})
+        },
+        riskAssessment: {
+          ...analyses.risk,
+          ...(synthesized.riskAssessment || {})
+        },
+        industryOutlook: {
+          ...analyses.macro,
+          ...(synthesized.industryOutlook || {})
+        },
+        managementAnalysis: {
+          ...analyses.management,
+          ...(synthesized.managementAnalysis || {})
+        },
+        isFinal: true
+      };
+      if (onStep) {
+        onStep({ type: "report", data: finalReport, isFinal: true });
+      }
+    }
+  } catch (err) {
+    console.error(`[pipeline] CIO Supervisor synthesis failed:`, err.message);
+  }
+
   // Update total time in meta
-  report._meta.totalTime = timer.elapsedStr();
+  finalReport._meta.totalTime = timer.elapsedStr();
 
   // Cache final report
-  setCache("report:" + cacheKey, report);
+  setCache("report:" + cacheKey, finalReport);
 
   if (onStep) {
     onStep({ type: "done" });
   }
 
   console.log(`[pipeline] ✅ COMPLETE — ${timer.elapsedStr()}`);
-  console.log(`[pipeline] Verdict: ${report.verdict} (${report.confidence}% confidence)`);
+  console.log(`[pipeline] Verdict: ${finalReport.verdict} (${finalReport.confidence}% confidence)`);
   console.log(`${"=".repeat(60)}\n`);
 
-  return report;
+  return finalReport;
 }
