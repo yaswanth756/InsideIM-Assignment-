@@ -6,7 +6,10 @@ import researchRouter from "./routes/research.js";
 const app = express();
 const PORT = process.env.PORT || 8000;
 
-app.use(cors({ origin: "*" }));
+const ALLOWED_ORIGINS = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(",").map(u => u.trim())
+  : ["http://localhost:3000"];
+app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
