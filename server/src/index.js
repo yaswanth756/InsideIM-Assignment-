@@ -8,8 +8,21 @@ const PORT = process.env.PORT || 8000;
 
 const ALLOWED_ORIGINS = process.env.CLIENT_URL
   ? process.env.CLIENT_URL.split(",").map(u => u.trim())
-  : ["http://localhost:3000"];
-app.use(cors({ origin: ALLOWED_ORIGINS }));
+  : [];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.length > 0) {
+      const isAllowed = ALLOWED_ORIGINS.includes(origin) || 
+                        ALLOWED_ORIGINS.includes("*") || 
+                        origin.startsWith("http://localhost:");
+      return callback(null, isAllowed);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
