@@ -526,7 +526,7 @@ Below are real outputs from our agent on 3 different companies across different 
 
 ---
 
-## 7. BONUS: LLM Chat Session Transcript & Logs
+## 7.LLM Chat Session Transcript & Logs
 
 ### 🤖 AI-Assisted Development Process
 
